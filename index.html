@@ -1,0 +1,268 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Graph Making Tool</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#0b1f3a;--muted:#586379;--line:#d9dee7;--plot:#fff;--grid:#e3e7ee;--axis:#2b3a52;--accent:#1d4ed8;--err:#b42318;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f141c;--panel:#161d29;--ink:#e8edf5;--muted:#9aa7ba;--line:#2a3445;--plot:#0f141c;--grid:#243044;--axis:#8b98ac;--accent:#60a5fa;--err:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f141c;--panel:#161d29;--ink:#e8edf5;--muted:#9aa7ba;--line:#2a3445;--plot:#0f141c;--grid:#243044;--axis:#8b98ac;--accent:#60a5fa;--err:#f87171;color-scheme:dark}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{display:grid;grid-template-columns:350px 1fr;height:100%}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:20px;margin:0}
+.sub{margin:2px 0 0;color:var(--muted);font-size:13px}
+h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.row{display:grid;grid-template-columns:14px 1fr 30px;gap:8px;align-items:center;margin-bottom:8px}
+.sw{width:14px;height:14px;border-radius:50%}
+.msg{grid-column:2/4;font-size:12px;color:var(--muted);min-height:0;margin-top:-4px}
+.msg.err{color:var(--err)}
+.msg:empty{display:none}
+input[type=text],input[type=number]{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.x{padding:4px 0;line-height:1}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.grid2 label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{padding:4px 9px;font-size:13px;border-radius:99px}
+.hint{font-size:12px;color:var(--muted);margin:0}
+#status{font-size:12px;color:var(--muted);min-height:16px}
+main{position:relative;min-width:0;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;display:block}
+canvas:active{cursor:grabbing}
+#pos{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--muted);background:var(--plot);padding:2px 8px;border-radius:99px;border:1px solid var(--line);pointer-events:none}
+@media (max-width:800px){
+ html,body{height:auto;min-height:100%}
+ .app{display:flex;flex-direction:column}
+ main{order:-1;height:62vh;height:62svh;flex:none}
+ aside{border-right:0;border-top:1px solid var(--line);overflow:visible}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+ <div><h1>Graph Making Tool</h1><p class="sub">Type a function of x and watch it plot live.</p></div>
+ <section><h2>Functions</h2><div id="rows"></div><button id="add" class="primary">+ Add function</button></section>
+ <section><h2>Range</h2>
+  <div class="grid2">
+   <label>x min<input type="number" id="xmin" step="any"></label><label>x max<input type="number" id="xmax" step="any"></label>
+   <label>y min<input type="number" id="ymin" step="any"></label><label>y max<input type="number" id="ymax" step="any"></label>
+  </div><div id="rangeErr" class="msg err" role="alert" style="margin-top:6px"></div>
+ </section>
+ <section><h2>View</h2>
+  <div class="btns"><button id="zin" aria-label="Zoom in">Zoom +</button><button id="zout" aria-label="Zoom out">Zoom −</button><button id="eq">1:1</button><button id="reset">Reset</button><button id="png">Export PNG</button></div>
+  <div id="status" aria-live="polite"></div>
+ </section>
+ <section><h2>Try these</h2><div class="chips" id="chips"></div></section>
+ <p class="hint">Drag to pan, scroll or pinch to zoom. Use ^ for powers (x^2), and write 3x or 2sin(x) without a *. Supported: + − * / ^, parentheses, pi, e, sin, cos, tan, log (base 10), ln, sqrt, abs, exp.</p>
+</aside>
+<main><canvas id="cv" aria-label="Graph of the entered functions"></canvas><div id="pos"></div></main>
+</div>
+<script>
+"use strict";
+/* ---------- 1. Tokenizer ---------- */
+function tokenize(src){
+  const out=[];let i=0;
+  while(i<src.length){
+    const c=src[i],rest=src.slice(i);let m;
+    if(/\s/.test(c)){i++;continue}
+    if((m=/^(\d+\.?\d*|\.\d+)/.exec(rest))){out.push({k:"num",v:parseFloat(m[0]),p:i});i+=m[0].length;continue}
+    if((m=/^[A-Za-z]+/.exec(rest))){out.push({k:"id",v:m[0].toLowerCase(),p:i});i+=m[0].length;continue}
+    if("+-*/^".includes(c)){out.push({k:"op",v:c,p:i});i++;continue}
+    if(c==="("||c===")"){out.push({k:c,p:i});i++;continue}
+    throw new Error("Unexpected character ‘"+c+"’ at position "+(i+1));
+  }
+  return out;
+}
+/* ---------- 2. Parser (recursive descent -> AST) ---------- */
+const CONST={pi:Math.PI,e:Math.E};
+const FN={sin:Math.sin,cos:Math.cos,tan:Math.tan,log:Math.log10,ln:Math.log,sqrt:Math.sqrt,abs:Math.abs,exp:Math.exp};
+function parse(toks){
+  let i=0;const peek=()=>toks[i];
+  const bad=t=>{throw new Error(t?"Unexpected ‘"+(t.v!==undefined?t.v:t.k)+"’ at position "+(t.p+1):"The expression ends unexpectedly")};
+  const close=()=>{if(!peek()||peek().k!==")")throw new Error("Missing closing ‘)’");i++};
+  function expr(){let l=term();while(peek()&&peek().k==="op"&&(peek().v==="+"||peek().v==="-")){const o=toks[i++].v;l={t:"bin",o,l,r:term()}}return l}
+  function term(){let l=unary();for(;;){const t=peek();if(!t)break;
+    if(t.k==="op"&&(t.v==="*"||t.v==="/")){i++;l={t:"bin",o:t.v,l,r:unary()}}
+    else if(t.k==="num"||t.k==="id"||t.k==="("){l={t:"bin",o:"*",l,r:unary()}}
+    else break}return l}
+  function unary(){const t=peek();if(t&&t.k==="op"&&(t.v==="-"||t.v==="+")){i++;const a=unary();return t.v==="-"?{t:"neg",a}:a}return power()}
+  function power(){const b=primary(),t=peek();if(t&&t.k==="op"&&t.v==="^"){i++;return{t:"bin",o:"^",l:b,r:unary()}}return b}
+  function primary(){const t=toks[i++];if(!t)bad();
+    if(t.k==="num")return{t:"num",v:t.v};
+    if(t.k==="("){const e=expr();close();return e}
+    if(t.k==="id"){
+      if(t.v==="x")return{t:"x"};
+      if(t.v in CONST)return{t:"num",v:CONST[t.v]};
+      if(t.v in FN){const n=peek();if(!n||n.k!=="(")throw new Error(t.v+" needs parentheses, like "+t.v+"(x)");i++;const a=expr();close();return{t:"fn",n:t.v,a}}
+      throw new Error("Unknown name ‘"+t.v+"’ at position "+(t.p+1));
+    }
+    bad(t)}
+  const root=expr();if(i<toks.length)bad(toks[i]);return root;
+}
+/* ---------- 3. Evaluator (AST -> fast function) ---------- */
+function compile(n){
+  switch(n.t){
+    case "num":{const v=n.v;return()=>v}
+    case "x":return x=>x;
+    case "neg":{const a=compile(n.a);return x=>-a(x)}
+    case "fn":{const a=compile(n.a),f=FN[n.n];return x=>f(a(x))}
+    case "bin":{const l=compile(n.l),r=compile(n.r);
+      switch(n.o){case "+":return x=>l(x)+r(x);case "-":return x=>l(x)-r(x);case "*":return x=>l(x)*r(x);case "/":return x=>l(x)/r(x);default:return x=>Math.pow(l(x),r(x))}}
+  }
+}
+function build(s){
+  s=s.replace(/[−–]/g,"-").replace(/[×·]/g,"*").replace(/÷/g,"/").replace(/²/g,"^2").replace(/³/g,"^3").replace(/π/g,"pi").replace(/^\s*(y|f\(x\))\s*=/i,"");
+  const toks=tokenize(s);return toks.length?compile(parse(toks)):null;
+}
+/* ---------- 4. UI state ---------- */
+const $=id=>document.getElementById(id);
+const PAL=["#2563EB","#DC2626","#059669","#D97706","#7C3AED","#DB2777"];
+const fns=[];let view={x0:-10,x1:10,y0:-7,y1:7},inited=false;
+const cv=$("cv"),ctx=cv.getContext("2d");let dpr=1;
+const cw=()=>cv.width/dpr,ch=()=>cv.height/dpr;
+const fmt=v=>String(Number(v.toFixed(10)));
+function addRow(expr){
+  if(fns.length>=6)return;
+  const color=PAL.find(c=>!fns.some(f=>f.color===c));
+  const f={color,expr:expr||"",f:null,err:"",note:""};fns.push(f);
+  const row=document.createElement("div");row.className="row";
+  const sw=document.createElement("span");sw.className="sw";sw.style.background=color;
+  const inp=document.createElement("input");inp.type="text";inp.value=f.expr;inp.placeholder="e.g. x^2 - 3x + 2";inp.setAttribute("aria-label","Function "+fns.length);inp.autocomplete="off";inp.spellcheck=false;
+  const del=document.createElement("button");del.className="x";del.textContent="✕";del.setAttribute("aria-label","Remove function");
+  const msg=document.createElement("div");msg.className="msg";msg.setAttribute("role","status");
+  f.msg=msg;row.append(sw,inp,del,msg);$("rows").append(row);
+  const upd=()=>{f.expr=inp.value;try{f.f=build(f.expr);f.err=""}catch(e){f.f=null;f.err=e.message}f.note="";showMsg(f);draw()};
+  inp.addEventListener("input",upd);
+  del.addEventListener("click",()=>{if(fns.length<2){inp.value="";upd();return}fns.splice(fns.indexOf(f),1);row.remove();$("add").disabled=false;draw()});
+  upd();$("add").disabled=fns.length>=6;
+}
+function showMsg(f){f.msg.textContent=f.err||f.note;f.msg.className="msg"+(f.err?" err":"")}
+function syncInputs(){
+  [["xmin","x0"],["xmax","x1"],["ymin","y0"],["ymax","y1"]].forEach(([id,k])=>{const el=$(id);if(document.activeElement!==el)el.value=Number(view[k].toPrecision(5))});
+  $("rangeErr").textContent="";
+}
+function readRange(){
+  const v=["xmin","xmax","ymin","ymax"].map(id=>parseFloat($(id).value));
+  if(v.some(n=>!isFinite(n))){$("rangeErr").textContent="Enter a number in every range box.";return}
+  if(v[0]>=v[1]||v[2]>=v[3]){$("rangeErr").textContent="Each min must be smaller than its max.";return}
+  $("rangeErr").textContent="";view={x0:v[0],x1:v[1],y0:v[2],y1:v[3]};draw();
+}
+["xmin","xmax","ymin","ymax"].forEach(id=>$(id).addEventListener("input",readRange));
+function zoomAt(px,py,f){
+  const W=cw(),H=ch(),wx=view.x0+px/W*(view.x1-view.x0),wy=view.y1-py/H*(view.y1-view.y0);
+  view={x0:wx-(wx-view.x0)*f,x1:wx+(view.x1-wx)*f,y0:wy-(wy-view.y0)*f,y1:wy+(view.y1-wy)*f};syncInputs();draw();
+}
+function reset(){const k=ch()/cw();view={x0:-10,x1:10,y0:-10*k,y1:10*k};syncInputs();draw()}
+$("zin").onclick=()=>zoomAt(cw()/2,ch()/2,.8);
+$("zout").onclick=()=>zoomAt(cw()/2,ch()/2,1.25);
+$("reset").onclick=reset;
+$("eq").onclick=()=>{const c=(view.y0+view.y1)/2,h=(view.x1-view.x0)*ch()/cw()/2;view.y0=c-h;view.y1=c+h;syncInputs();draw()};
+$("add").onclick=()=>addRow("");
+["x^2-3x+2","sin(x)/x","tan(x)","ln(x)","e^(-x^2)","sqrt(x)","abs(x)-2","1/x"].forEach(s=>{const b=document.createElement("button");b.textContent=s;b.onclick=()=>{
+  const empty=fns.find(f=>!f.expr.trim());
+  if(empty){const i=fns.indexOf(empty);const inp=$("rows").children[i].querySelector("input");inp.value=s;inp.dispatchEvent(new Event("input"))}
+  else if(fns.length<6)addRow(s);
+  else{const inp=$("rows").lastElementChild.querySelector("input");inp.value=s;inp.dispatchEvent(new Event("input"))}};$("chips").append(b)});
+/* ---------- 5. Point generator + renderer ---------- */
+function niceStep(r){const raw=r/8,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p;return(f<1.5?1:f<3.5?2:f<7.5?5:10)*p}
+function draw(){
+  if(!inited)return;
+  const W=cw(),H=ch(),css=getComputedStyle(document.documentElement),col=n=>css.getPropertyValue(n).trim();
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=col("--plot");ctx.fillRect(0,0,W,H);
+  const{x0,x1,y0,y1}=view,sx=W/(x1-x0),sy=H/(y1-y0),X=x=>(x-x0)*sx,Y=y=>H-(y-y0)*sy;
+  const gx=niceStep(x1-x0),gy=niceStep(y1-y0);
+  ctx.lineWidth=1;ctx.strokeStyle=col("--grid");ctx.beginPath();
+  for(let v=Math.ceil(x0/gx)*gx;v<=x1;v+=gx){const p=Math.round(X(v))+.5;ctx.moveTo(p,0);ctx.lineTo(p,H)}
+  for(let v=Math.ceil(y0/gy)*gy;v<=y1;v+=gy){const p=Math.round(Y(v))+.5;ctx.moveTo(0,p);ctx.lineTo(W,p)}
+  ctx.stroke();
+  const ax=Math.min(Math.max(X(0),0),W),ay=Math.min(Math.max(Y(0),0),H);
+  ctx.strokeStyle=col("--axis");ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(ax,0);ctx.lineTo(ax,H);ctx.moveTo(0,ay);ctx.lineTo(W,ay);ctx.stroke();
+  ctx.font="12px system-ui,sans-serif";ctx.lineJoin="round";
+  const label=(t,x,y,al)=>{ctx.textAlign=al;ctx.lineWidth=3;ctx.strokeStyle=col("--plot");ctx.strokeText(t,x,y);ctx.fillStyle=col("--axis");ctx.fillText(t,x,y)};
+  const ly=Math.min(Math.max(ay+15,14),H-6);
+  for(let v=Math.ceil(x0/gx)*gx;v<=x1;v+=gx){if(Math.abs(v)<gx/1e6)continue;label(fmt(v),X(v),ly,"center")}
+  const lx=ax>W-40?ax-6:ax+6,al=ax>W-40?"right":"left";
+  for(let v=Math.ceil(y0/gy)*gy;v<=y1;v+=gy){if(Math.abs(v)<gy/1e6)continue;label(fmt(v),lx,Y(v)+4,al)}
+  const span=y1-y0,n=Math.ceil(W);
+  ctx.save();ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();ctx.lineWidth=2.5;
+  for(const f of fns){
+    let note="";
+    if(f.f){
+      ctx.strokeStyle=f.color;ctx.beginPath();let pen=false,prev=0,undef=null;
+      for(let k=0;k<=n;k++){
+        const x=x0+(x1-x0)*k/n;let y;try{y=f.f(x)}catch(e){y=NaN}
+        if(!isFinite(y)){if(undef===null)undef=x;pen=false;continue}
+        if(pen&&Math.sign(prev)!==Math.sign(y)&&Math.abs(y-prev)>span*.3)pen=false;
+        const px=k*W/n,py=Math.max(-1e5,Math.min(1e5,Y(y)));
+        if(pen)ctx.lineTo(px,py);else ctx.moveTo(px,py);
+        pen=true;prev=y;
+      }
+      ctx.stroke();
+      if(undef!==null)note="Undefined or discontinuous in view (first near x ≈ "+Number(undef.toPrecision(3))+").";
+    }
+    if(f.note!==note){f.note=note;showMsg(f)}
+  }
+  ctx.restore();
+  const act=fns.filter(f=>f.f);
+  if(act.length){
+    ctx.font="13px system-ui,sans-serif";ctx.textAlign="left";
+    const w=Math.min(W-20,Math.max(...act.map(f=>ctx.measureText("y = "+f.expr).width))+44),h=act.length*20+10;
+    ctx.fillStyle=col("--plot");ctx.globalAlpha=.9;ctx.fillRect(10,10,w,h);ctx.globalAlpha=1;ctx.strokeStyle=col("--grid");ctx.lineWidth=1;ctx.strokeRect(10.5,10.5,w,h);
+    act.forEach((f,i)=>{const y=30+i*20;ctx.strokeStyle=f.color;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(18,y-4);ctx.lineTo(36,y-4);ctx.stroke();ctx.fillStyle=col("--axis");ctx.fillText("y = "+f.expr,44,y)});
+  }
+}
+/* ---------- 6. Sizing, pan, zoom ---------- */
+new ResizeObserver(()=>{
+  const r=cv.getBoundingClientRect();dpr=window.devicePixelRatio||1;
+  cv.width=Math.max(1,Math.round(r.width*dpr));cv.height=Math.max(1,Math.round(r.height*dpr));
+  if(!inited){inited=true;reset()}else draw();
+}).observe(cv);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",draw);
+const ptrs=new Map();
+cv.addEventListener("pointerdown",e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.offsetX,y:e.offsetY})});
+cv.addEventListener("pointermove",e=>{
+  const p=ptrs.get(e.pointerId);
+  if(!p){const W=cw(),H=ch();$("pos").textContent="x = "+Number((view.x0+e.offsetX/W*(view.x1-view.x0)).toPrecision(4))+",  y = "+Number((view.y1-e.offsetY/H*(view.y1-view.y0)).toPrecision(4));return}
+  if(ptrs.size===1){
+    const ux=(view.x1-view.x0)/cw(),uy=(view.y1-view.y0)/ch(),dx=(e.offsetX-p.x)*ux,dy=(e.offsetY-p.y)*uy;
+    view={x0:view.x0-dx,x1:view.x1-dx,y0:view.y0+dy,y1:view.y1+dy};syncInputs();draw();
+  }else if(ptrs.size===2){
+    const o=[...ptrs.entries()].find(([id])=>id!==e.pointerId)[1];
+    const d0=Math.hypot(p.x-o.x,p.y-o.y),d1=Math.hypot(e.offsetX-o.x,e.offsetY-o.y);
+    if(d0>0&&d1>0)zoomAt((e.offsetX+o.x)/2,(e.offsetY+o.y)/2,d0/d1);
+  }
+  p.x=e.offsetX;p.y=e.offsetY;
+});
+const up=e=>ptrs.delete(e.pointerId);
+cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
+cv.addEventListener("pointerleave",()=>{if(!ptrs.size)$("pos").textContent=""});
+cv.addEventListener("wheel",e=>{e.preventDefault();zoomAt(e.offsetX,e.offsetY,Math.exp(e.deltaY*.0015))},{passive:false});
+/* ---------- 7. PNG export ---------- */
+let dl=null;
+if(window.claude&&window.claude.use){window.claude.use("downloads").then(d=>{dl=d}).catch(()=>{})}
+$("png").onclick=()=>{
+  draw();
+  cv.toBlob(async blob=>{
+    const st=$("status");
+    try{
+      if(dl){await dl.save({filename:"graph.png",data:blob});st.textContent="Image export requested."}
+      else{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="graph.png";a.click();st.textContent="Image exported."}
+    }catch(e){st.textContent=e&&e.code==="declined"?"Export cancelled.":"Export isn’t available here."}
+  },"image/png");
+};
+addRow("x^2 - 3x + 2");addRow("sin(x)");
+</script>
+</body>
+</html>
